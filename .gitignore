@@ -2,3 +2,7 @@
 models/*.pkl
 __pycache__/
 *.pyc
+data/features/temporal_booking_features.csv
+data/raw/shipping_bookings_with_overbooking.csv
+*.pkl
+models/*.pkl
