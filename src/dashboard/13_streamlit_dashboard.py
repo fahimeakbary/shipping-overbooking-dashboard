@@ -85,7 +85,8 @@ def prepare_raw_booking_features(raw_data, customer_history):
     enriched = raw_data.merge(
         customer_history[history_cols],
         on="Customer Number",
-        how="left"
+        how="left",
+        suffixes=("", "_history")
     )
 
     # Fill missing history for new customers
@@ -94,8 +95,19 @@ def prepare_raw_booking_features(raw_data, customer_history):
     enriched["Loaded_Bookings"] = enriched["Loaded_Bookings"].fillna(0)
     enriched["NoShow_Rate"] = enriched["NoShow_Rate"].fillna(0)
     enriched["Booking_Reliability_Score"] = enriched["Booking_Reliability_Score"].fillna(0)
-    enriched["Reserved_Meter"] = enriched["Reserved_Meter"].fillna(0)
-    enriched["Loaded_Meter"] = enriched["Loaded_Meter"].fillna(0)
+
+    # Because uploaded data already has Reserved Meter, history columns may get suffixes
+    if "Reserved_Meter_history" in enriched.columns:
+        enriched["Reserved_Meter_history"] = enriched["Reserved_Meter_history"].fillna(0)
+        historical_reserved_meter = enriched["Reserved_Meter_history"]
+    else:
+        historical_reserved_meter = 0
+
+    if "Loaded_Meter" in enriched.columns:
+        enriched["Loaded_Meter"] = enriched["Loaded_Meter"].fillna(0)
+        historical_loaded_meter = enriched["Loaded_Meter"]
+    else:
+        historical_loaded_meter = 0
 
     # Create temporal features required by the model
     enriched["Historical_Bookings"] = enriched["Total_Final_Bookings"]
@@ -103,8 +115,8 @@ def prepare_raw_booking_features(raw_data, customer_history):
     enriched["Historical_Loaded"] = enriched["Loaded_Bookings"]
     enriched["Historical_NoShow_Rate"] = enriched["NoShow_Rate"]
     enriched["Historical_Reliability"] = enriched["Booking_Reliability_Score"]
-    enriched["Historical_Reserved_Meter"] = enriched["Reserved_Meter"]
-    enriched["Historical_Loaded_Meter"] = enriched["Loaded_Meter"]
+    enriched["Historical_Reserved_Meter"] = historical_reserved_meter
+    enriched["Historical_Loaded_Meter"] = historical_loaded_meter
 
     if "Days_Since_Last_Booking" not in enriched.columns:
         enriched["Days_Since_Last_Booking"] = 0
@@ -117,7 +129,7 @@ def run_prediction(input_data, required_columns):
     Run NoShow prediction.
     """
 
-    X_new = input_data[required_columns]
+    X_new = input_data[required_columns].copy()
 
     input_data["NoShow_Probability"] = model.predict_proba(X_new)[:, 1]
     input_data["Predicted_NoShow"] = model.predict(X_new)
@@ -127,6 +139,107 @@ def run_prediction(input_data, required_columns):
     ].apply(assign_prediction_risk)
 
     return input_data
+
+
+def show_prediction_summary(predicted_data):
+    """
+    Show prediction results as KPI cards and risk interpretation.
+    """
+
+    avg_probability = predicted_data["NoShow_Probability"].mean()
+
+    predicted_noshow_count = int(
+        predicted_data["Predicted_NoShow"].sum()
+    )
+
+    high_risk_count = int(
+        (
+            predicted_data["Prediction_Risk_Category"]
+            == "High NoShow Risk"
+        ).sum()
+    )
+
+    medium_risk_count = int(
+        (
+            predicted_data["Prediction_Risk_Category"]
+            == "Medium NoShow Risk"
+        ).sum()
+    )
+
+    low_risk_count = int(
+        (
+            predicted_data["Prediction_Risk_Category"]
+            == "Low NoShow Risk"
+        ).sum()
+    )
+
+    st.subheader("Prediction Summary")
+
+    summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+
+    summary_col1.metric(
+        "Average NoShow Probability",
+        f"{avg_probability:.2%}"
+    )
+
+    summary_col2.metric(
+        "Predicted NoShows",
+        predicted_noshow_count
+    )
+
+    summary_col3.metric(
+        "High Risk",
+        high_risk_count
+    )
+
+    summary_col4.metric(
+        "Low Risk",
+        low_risk_count
+    )
+
+    if high_risk_count > 0:
+        st.error(
+            f"{high_risk_count} booking(s) are classified as High NoShow Risk. "
+            "These bookings should be reviewed before final capacity planning."
+        )
+    elif medium_risk_count > 0:
+        st.warning(
+            f"{medium_risk_count} booking(s) are classified as Medium NoShow Risk. "
+            "These bookings may need monitoring."
+        )
+    else:
+        st.success(
+            "All uploaded bookings are classified as Low NoShow Risk."
+        )
+
+    high_risk_df = predicted_data[
+        predicted_data["Prediction_Risk_Category"] == "High NoShow Risk"
+    ]
+
+    if not high_risk_df.empty:
+        st.subheader("High Risk Bookings")
+
+        high_risk_display_cols = [
+            "Customer Number",
+            "Departure Port",
+            "Arrival Port",
+            "Sail Date",
+            "Sail Time",
+            "Ship Code",
+            "Reserved Meter",
+            "NoShow_Probability",
+            "Prediction_Risk_Category"
+        ]
+
+        high_risk_display_cols = [
+            col for col in high_risk_display_cols
+            if col in high_risk_df.columns
+        ]
+
+        st.dataframe(
+            high_risk_df[high_risk_display_cols],
+            width="stretch"
+        )
 
 
 # ==============================
@@ -316,10 +429,14 @@ with tab4:
 
                     st.success("Prediction completed!")
 
+                    show_prediction_summary(predicted_data)
+
                     existing_display_columns = [
                         col for col in display_columns
                         if col in predicted_data.columns
                     ]
+
+                    st.subheader("Full Prediction Results")
 
                     st.dataframe(
                         predicted_data[existing_display_columns],
@@ -465,20 +582,14 @@ with tab4:
                     model_required_columns
                 )
 
-                probability = predicted_data.loc[0, "NoShow_Probability"]
-                risk_category = predicted_data.loc[0, "Prediction_Risk_Category"]
-                predicted_noshow = predicted_data.loc[0, "Predicted_NoShow"]
-
-                col_result1, col_result2, col_result3 = st.columns(3)
-
-                col_result1.metric("NoShow Probability", f"{probability:.2%}")
-                col_result2.metric("Predicted NoShow", int(predicted_noshow))
-                col_result3.metric("Risk Category", risk_category)
+                show_prediction_summary(predicted_data)
 
                 existing_display_columns = [
                     col for col in display_columns
                     if col in predicted_data.columns
                 ]
+
+                st.subheader("Full Prediction Results")
 
                 st.dataframe(
                     predicted_data[existing_display_columns],
