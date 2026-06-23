@@ -336,16 +336,27 @@ with tab4:
             # Calculate historical rates
             # ==============================
 
+# ==============================
+# Calculate historical rates
+# ==============================
+            
             if historical_bookings > 0:
                 historical_noshow_rate = historical_noshows / historical_bookings
-                historical_reliability = historical_loaded / historical_bookings
             else:
                 historical_noshow_rate = 0
+            
+            if historical_reserved_meter > 0:
+                historical_reliability = historical_loaded_meter / historical_reserved_meter
+            else:
                 historical_reliability = 0
-
+            
+            # Keep values in a valid range between 0 and 1
+            historical_noshow_rate = min(max(historical_noshow_rate, 0), 1)
+            historical_reliability = min(max(historical_reliability, 0), 1)
+            
             st.info(
                 f"Historical NoShow Rate: {historical_noshow_rate:.2%} | "
-                f"Historical Reliability: {historical_reliability:.2%}"
+                f"Meter-based Reliability: {historical_reliability:.2%}"
             )
 
             if st.button("Predict NoShow Risk"):
