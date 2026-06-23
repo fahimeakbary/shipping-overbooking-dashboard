@@ -11,6 +11,7 @@ import joblib
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DASHBOARD_DIR = BASE_DIR / "dashboard"
+FEATURE_DIR = BASE_DIR / "data" / "features"
 MODEL_PATH = BASE_DIR / "models" / "temporal_noshow_random_forest_model.pkl"
 
 
@@ -34,6 +35,7 @@ kpi = pd.read_csv(DASHBOARD_DIR / "kpi_summary.csv")
 risky_customers = pd.read_csv(DASHBOARD_DIR / "top_risky_customers.csv")
 overbooked_voyages = pd.read_csv(DASHBOARD_DIR / "top_overbooked_voyages.csv")
 recommendations = pd.read_csv(DASHBOARD_DIR / "top_smart_recommendations.csv")
+customer_features = pd.read_csv(FEATURE_DIR / "customer_features_clean.csv")
 
 
 # ==============================
@@ -61,6 +63,74 @@ def assign_prediction_risk(prob):
         return "Medium NoShow Risk"
     else:
         return "Low NoShow Risk"
+
+
+def prepare_raw_booking_features(raw_data, customer_history):
+    """
+    Convert raw new booking data into model-ready temporal features.
+    The user only needs to upload booking-level columns.
+    Historical customer features are added automatically from customer_features_clean.csv.
+    """
+
+    history_cols = [
+        "Customer Number",
+        "Total_Final_Bookings",
+        "NoShow_Count",
+        "Loaded_Bookings",
+        "NoShow_Rate",
+        "Booking_Reliability_Score",
+        "Reserved_Meter",
+        "Loaded_Meter"
+    ]
+
+    enriched = raw_data.merge(
+        customer_history[history_cols],
+        on="Customer Number",
+        how="left",
+        suffixes=("", "_history")
+    )
+
+    # Fill unknown customers with zero history
+    enriched["Total_Final_Bookings"] = enriched["Total_Final_Bookings"].fillna(0)
+    enriched["NoShow_Count"] = enriched["NoShow_Count"].fillna(0)
+    enriched["Loaded_Bookings"] = enriched["Loaded_Bookings"].fillna(0)
+    enriched["NoShow_Rate"] = enriched["NoShow_Rate"].fillna(0)
+    enriched["Booking_Reliability_Score"] = enriched["Booking_Reliability_Score"].fillna(0)
+    enriched["Reserved_Meter_history"] = enriched["Reserved_Meter_history"].fillna(0)
+    enriched["Loaded_Meter"] = enriched["Loaded_Meter"].fillna(0)
+
+    # Create temporal model features
+    enriched["Historical_Bookings"] = enriched["Total_Final_Bookings"]
+    enriched["Historical_NoShows"] = enriched["NoShow_Count"]
+    enriched["Historical_Loaded"] = enriched["Loaded_Bookings"]
+    enriched["Historical_NoShow_Rate"] = enriched["NoShow_Rate"]
+    enriched["Historical_Reliability"] = enriched["Booking_Reliability_Score"]
+    enriched["Historical_Reserved_Meter"] = enriched["Reserved_Meter_history"]
+    enriched["Historical_Loaded_Meter"] = enriched["Loaded_Meter"]
+
+    # In production this should be calculated from last booking date.
+    # For demo purposes, unknown last-booking distance is set to 0.
+    if "Days_Since_Last_Booking" not in enriched.columns:
+        enriched["Days_Since_Last_Booking"] = 0
+
+    return enriched
+
+
+def run_prediction(input_data, required_columns):
+    """
+    Run NoShow prediction using the trained model.
+    """
+
+    X_new = input_data[required_columns]
+
+    input_data["NoShow_Probability"] = model.predict_proba(X_new)[:, 1]
+    input_data["Predicted_NoShow"] = model.predict(X_new)
+
+    input_data["Prediction_Risk_Category"] = input_data[
+        "NoShow_Probability"
+    ].apply(assign_prediction_risk)
+
+    return input_data
 
 
 # ==============================
@@ -159,10 +229,21 @@ with tab4:
     else:
         input_mode = st.radio(
             "Choose input method:",
-            ["Upload CSV", "Manual Input"]
+            ["Upload Raw Booking CSV", "Upload Full Feature CSV", "Manual Input"]
         )
 
-        required_columns = [
+        raw_required_columns = [
+            "Customer Number",
+            "Departure Port",
+            "Arrival Port",
+            "Sail Date",
+            "Sail Time",
+            "Ship Code",
+            "Reserved Meter",
+            "Reserved Heads"
+        ]
+
+        model_required_columns = [
             "Departure Port",
             "Arrival Port",
             "Sail Time",
@@ -188,68 +269,140 @@ with tab4:
             "Ship Code",
             "Reserved Meter",
             "Reserved Heads",
+            "Historical_Bookings",
+            "Historical_NoShow_Rate",
+            "Historical_Reliability",
             "NoShow_Probability",
             "Predicted_NoShow",
             "Prediction_Risk_Category"
         ]
 
         # ==============================
-        # Option A: Upload CSV
+        # Option A: Upload raw booking CSV
         # ==============================
 
-        if input_mode == "Upload CSV":
+        if input_mode == "Upload Raw Booking CSV":
 
-            st.subheader("Upload New Booking CSV")
+            st.subheader("Upload Raw New Booking CSV")
+
+            st.write(
+                "This option only requires booking-level columns. "
+                "Historical customer features are added automatically from the existing customer history table."
+            )
+
+            st.code(
+                "Customer Number,Departure Port,Arrival Port,Sail Date,Sail Time,Ship Code,Reserved Meter,Reserved Heads\n"
+                "C00542,Rostock,Trelleborg,2026-06-10,18:00,SHIP_03,14.5,1",
+                language="csv"
+            )
 
             uploaded_file = st.file_uploader(
-                "Upload new_bookings.csv",
-                type=["csv"]
+                "Upload raw_new_bookings.csv",
+                type=["csv"],
+                key="raw_upload"
             )
 
             if uploaded_file is not None:
-                new_data = pd.read_csv(uploaded_file)
+                raw_data = pd.read_csv(uploaded_file)
 
                 missing_columns = [
-                    col for col in required_columns
-                    if col not in new_data.columns
+                    col for col in raw_required_columns
+                    if col not in raw_data.columns
                 ]
 
                 if missing_columns:
-                    st.error("Missing required columns:")
+                    st.error("Missing required raw booking columns:")
                     st.write(missing_columns)
                 else:
-                    X_new = new_data[required_columns]
+                    prepared_data = prepare_raw_booking_features(
+                        raw_data,
+                        customer_features
+                    )
 
-                    new_data["NoShow_Probability"] = model.predict_proba(X_new)[:, 1]
-                    new_data["Predicted_NoShow"] = model.predict(X_new)
-
-                    new_data["Prediction_Risk_Category"] = new_data[
-                        "NoShow_Probability"
-                    ].apply(assign_prediction_risk)
+                    predicted_data = run_prediction(
+                        prepared_data,
+                        model_required_columns
+                    )
 
                     st.success("Prediction completed!")
 
                     existing_display_columns = [
                         col for col in display_columns
-                        if col in new_data.columns
+                        if col in predicted_data.columns
                     ]
 
                     st.dataframe(
-                        new_data[existing_display_columns],
+                        predicted_data[existing_display_columns],
                         width="stretch"
                     )
 
-                    csv = new_data.to_csv(index=False).encode("utf-8-sig")
+                    csv = predicted_data.to_csv(index=False).encode("utf-8-sig")
 
                     st.download_button(
                         label="Download Prediction Results as CSV",
                         data=csv,
-                        file_name="new_booking_predictions.csv",
+                        file_name="raw_booking_predictions.csv",
                         mime="text/csv"
                     )
 
         # ==============================
-        # Option B: Manual input
+        # Option B: Upload full feature CSV
+        # ==============================
+
+        elif input_mode == "Upload Full Feature CSV":
+
+            st.subheader("Upload Full Feature CSV")
+
+            st.write(
+                "This option requires all model feature columns, including historical customer features."
+            )
+
+            uploaded_file = st.file_uploader(
+                "Upload full_feature_new_bookings.csv",
+                type=["csv"],
+                key="full_upload"
+            )
+
+            if uploaded_file is not None:
+                full_data = pd.read_csv(uploaded_file)
+
+                missing_columns = [
+                    col for col in model_required_columns
+                    if col not in full_data.columns
+                ]
+
+                if missing_columns:
+                    st.error("Missing required model feature columns:")
+                    st.write(missing_columns)
+                else:
+                    predicted_data = run_prediction(
+                        full_data,
+                        model_required_columns
+                    )
+
+                    st.success("Prediction completed!")
+
+                    existing_display_columns = [
+                        col for col in display_columns
+                        if col in predicted_data.columns
+                    ]
+
+                    st.dataframe(
+                        predicted_data[existing_display_columns],
+                        width="stretch"
+                    )
+
+                    csv = predicted_data.to_csv(index=False).encode("utf-8-sig")
+
+                    st.download_button(
+                        label="Download Prediction Results as CSV",
+                        data=csv,
+                        file_name="full_feature_predictions.csv",
+                        mime="text/csv"
+                    )
+
+        # ==============================
+        # Option C: Manual input
         # ==============================
 
         elif input_mode == "Manual Input":
@@ -336,24 +489,19 @@ with tab4:
             # Calculate historical rates
             # ==============================
 
-# ==============================
-# Calculate historical rates
-# ==============================
-            
             if historical_bookings > 0:
                 historical_noshow_rate = historical_noshows / historical_bookings
             else:
                 historical_noshow_rate = 0
-            
+
             if historical_reserved_meter > 0:
                 historical_reliability = historical_loaded_meter / historical_reserved_meter
             else:
                 historical_reliability = 0
-            
-            # Keep values in a valid range between 0 and 1
+
             historical_noshow_rate = min(max(historical_noshow_rate, 0), 1)
             historical_reliability = min(max(historical_reliability, 0), 1)
-            
+
             st.info(
                 f"Historical NoShow Rate: {historical_noshow_rate:.2%} | "
                 f"Meter-based Reliability: {historical_reliability:.2%}"
@@ -382,20 +530,16 @@ with tab4:
                     }
                 )
 
-                X_manual = manual_data[required_columns]
-
-                manual_data["NoShow_Probability"] = model.predict_proba(X_manual)[:, 1]
-                manual_data["Predicted_NoShow"] = model.predict(X_manual)
-
-                manual_data["Prediction_Risk_Category"] = manual_data[
-                    "NoShow_Probability"
-                ].apply(assign_prediction_risk)
+                predicted_data = run_prediction(
+                    manual_data,
+                    model_required_columns
+                )
 
                 st.success("Prediction completed!")
 
-                probability = manual_data.loc[0, "NoShow_Probability"]
-                risk_category = manual_data.loc[0, "Prediction_Risk_Category"]
-                predicted_noshow = manual_data.loc[0, "Predicted_NoShow"]
+                probability = predicted_data.loc[0, "NoShow_Probability"]
+                risk_category = predicted_data.loc[0, "Prediction_Risk_Category"]
+                predicted_noshow = predicted_data.loc[0, "Predicted_NoShow"]
 
                 col_result1, col_result2, col_result3 = st.columns(3)
 
@@ -414,12 +558,17 @@ with tab4:
                     risk_category
                 )
 
+                existing_display_columns = [
+                    col for col in display_columns
+                    if col in predicted_data.columns
+                ]
+
                 st.dataframe(
-                    manual_data[display_columns],
+                    predicted_data[existing_display_columns],
                     width="stretch"
                 )
 
-                csv = manual_data.to_csv(index=False).encode("utf-8-sig")
+                csv = predicted_data.to_csv(index=False).encode("utf-8-sig")
 
                 st.download_button(
                     label="Download Manual Prediction as CSV",
