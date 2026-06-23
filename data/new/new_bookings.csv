@@ -1,0 +1,4 @@
+Customer Number,Departure Port,Arrival Port,Sail Date,Sail Time,Ship Code,Reserved Meter,Reserved Heads,Historical_Bookings,Historical_NoShows,Historical_Loaded,Historical_NoShow_Rate,Historical_Reliability,Historical_Reserved_Meter,Historical_Loaded_Meter,Days_Since_Last_Booking
+C00542,Rostock,Trelleborg,2026-06-10,18:00,SHIP_03,14.5,1,49,34,15,0.6938,0.3061,707.9,80.4,12
+C00869,Travemünde,Klaipeda,2026-06-11,22:00,SHIP_05,16.0,1,49,2,47,0.0408,0.9592,610.3,549.4,8
+C00752,Klaipeda,Rostock,2026-06-12,08:00,SHIP_02,13.0,2,52,36,16,0.6923,0.3077,763.2,91.0,5

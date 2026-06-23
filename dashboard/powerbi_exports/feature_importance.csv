@@ -1,0 +1,28 @@
+﻿Feature,Importance
+numeric__Meter_Utilization_Rate,0.1995230660889506
+numeric__Deferral_Candidate_Score,0.1870010422012881
+numeric__Booking_Reliability_Score,0.14173717396479
+numeric__NoShow_Rate,0.134215517906412
+numeric__Reserved Meter,0.1242350220147706
+numeric__Reserved Heads,0.0160270872553254
+categorical__Ship Code_SHIP_05,0.0116443309994645
+categorical__Ship Code_SHIP_04,0.0115446051248385
+categorical__Ship Code_SHIP_03,0.0112455237220205
+categorical__Ship Code_SHIP_02,0.0110998473818314
+categorical__Ship Code_SHIP_01,0.0110771782026696
+categorical__Sail Time_18:00,0.010674480871354
+categorical__Sail Time_06:00,0.0103495073079112
+categorical__Sail Time_08:00,0.0099296311119307
+categorical__Sail Time_22:00,0.0096979499528441
+categorical__Sail Time_14:00,0.0096302416926725
+categorical__Sail Time_10:00,0.0091732297376159
+categorical__Arrival Port_Trelleborg,0.0088950711629677
+categorical__Departure Port_Travemünde,0.008828539439815
+categorical__Arrival Port_Travemünde,0.0087701490891206
+categorical__Arrival Port_Rostock,0.0086350659344744
+categorical__Arrival Port_Klaipeda,0.0086075580479147
+categorical__Departure Port_Rostock,0.0084243077794427
+categorical__Departure Port_Trelleborg,0.0083073805324253
+categorical__Departure Port_Klaipeda,0.0079508972290919
+categorical__Departure Port_Swinoujscie,0.0065949342148855
+categorical__Arrival Port_Swinoujscie,0.0061806610331716
